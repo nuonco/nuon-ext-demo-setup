@@ -1,0 +1,7 @@
+[extension]
+name = "demo-setup"
+description = "Extension for setting up demo environments"
+
+[extension.auth]
+requires_token = true
+requires_org = true

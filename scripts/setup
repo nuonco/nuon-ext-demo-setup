@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Create a demo org
+echo "Creating demo org..."
+nuon orgs create --name "Demo Test Setup"
+
+echo "Demo setup complete!"
