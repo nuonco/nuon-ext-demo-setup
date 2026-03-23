@@ -1,8 +1,69 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Create a demo org
-echo "Creating demo org..."
-nuon orgs create --name "Demo Test Setup"
+APPS=(
+  "coder"
+  "httpbin"
+  "ecs-simple"
+  "eks-simple"
+  "aws-lambda"
+  "uptime-monitor"
+)
 
-echo "Demo setup complete!"
+REPO_URL="https://github.com/nuonco/example-app-configs.git"
+REPO_DIR="/tmp/example-app-configs"
+
+# Get org name from argument or use default
+ORG_NAME="${1:-Demo Test Setup}"
+
+echo "========================================="
+echo "  Nuon Demo Environment Setup"
+echo "========================================="
+echo ""
+
+echo "📦 Creating demo org: $ORG_NAME"
+nuon orgs create --name "$ORG_NAME"
+echo "✓ Org created successfully"
+
+echo ""
+echo "📥 Cloning/updating example-app-configs repo..."
+if [ -d "$REPO_DIR" ]; then
+  cd "$REPO_DIR"
+  git checkout main > /dev/null 2>&1
+  git pull > /dev/null 2>&1
+  echo "✓ Repository updated"
+else
+  git clone "$REPO_URL" "$REPO_DIR" > /dev/null 2>&1
+  cd "$REPO_DIR"
+  git checkout main > /dev/null 2>&1
+  echo "✓ Repository cloned"
+fi
+
+echo ""
+echo "🚀 Creating and syncing apps..."
+echo ""
+
+for app in "${APPS[@]}"; do
+  if [ ! -d "$REPO_DIR/$app" ]; then
+    echo "  ⚠️  Warning: Directory for $app not found, skipping..."
+    continue
+  fi
+  
+  cd "$REPO_DIR/$app"
+  
+  echo "  📱 $app"
+  nuon apps create --name "$app" > /dev/null 2>&1
+  echo "    ✓ App created"
+  
+  nuon apps sync > /dev/null 2>&1
+  echo "    ✓ App synced"
+  echo ""
+done
+
+echo "========================================="
+echo "✓ Demo setup complete!"
+echo "========================================="
+echo ""
+echo "Org Name: $ORG_NAME"
+echo "Apps created: ${APPS[*]}"
+echo ""
