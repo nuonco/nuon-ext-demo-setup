@@ -22,8 +22,23 @@ echo "========================================="
 echo ""
 
 echo "📦 Creating demo org: $ORG_NAME"
-nuon orgs create --name "$ORG_NAME"
-echo "✓ Org created successfully"
+ORG_OUTPUT=$(nuon orgs create --name "$ORG_NAME" 2>&1)
+echo "$ORG_OUTPUT"
+
+# Extract org ID from output (format: "current org is now Name: orgid")
+ORG_ID=$(echo "$ORG_OUTPUT" | grep -o 'org[a-z0-9]\+' | tail -1)
+
+if [ -z "$ORG_ID" ]; then
+  echo "❌ Failed to extract org ID from output"
+  exit 1
+fi
+
+echo "✓ Org created successfully (ID: $ORG_ID)"
+
+echo ""
+echo "🔄 Selecting into new org..."
+nuon orgs select --org "$ORG_ID"
+echo "✓ Org selected"
 
 echo ""
 echo "📥 Cloning/updating example-app-configs repo..."
@@ -65,5 +80,6 @@ echo "✓ Demo setup complete!"
 echo "========================================="
 echo ""
 echo "Org Name: $ORG_NAME"
+echo "Org ID: $ORG_ID"
 echo "Apps created: ${APPS[*]}"
 echo ""
