@@ -36,18 +36,11 @@ nuon orgs select --org "$ORG_ID"
 echo "✓ Org selected"
 
 echo ""
-echo "📥 Cloning/updating example-app-configs repo..."
-if [ -d "$REPO_DIR" ]; then
-  cd "$REPO_DIR"
-  git checkout main > /dev/null 2>&1
-  git pull > /dev/null 2>&1
-  echo "✓ Repository updated"
-else
-  git clone "$REPO_URL" "$REPO_DIR" > /dev/null 2>&1
-  cd "$REPO_DIR"
-  git checkout main > /dev/null 2>&1
-  echo "✓ Repository cloned"
-fi
+echo "📥 Cloning example-app-configs repo..."
+rm -rf "$REPO_DIR"
+git clone "$REPO_URL" "$REPO_DIR"
+cd "$REPO_DIR"
+echo "✓ Repository cloned"
 
 echo ""
 echo "🚀 Creating and syncing apps..."
