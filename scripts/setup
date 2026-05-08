@@ -2,12 +2,7 @@
 set -euo pipefail
 
 APPS=(
-  "coder"
   "httpbin"
-  "ecs-simple"
-  "eks-simple"
-  "aws-lambda"
-  "uptime-monitor"
 )
 
 REPO_URL="https://github.com/nuonco/example-app-configs.git"
@@ -67,10 +62,12 @@ for app in "${APPS[@]}"; do
   cd "$REPO_DIR/$app"
   
   echo "  📱 $app"
-  nuon apps create --name "$app" > /dev/null 2>&1
+  APP_OUTPUT=$(nuon apps create --name "$app" 2>&1)
+  echo "$APP_OUTPUT"
   echo "    ✓ App created"
   
-  nuon apps sync > /dev/null 2>&1
+  SYNC_OUTPUT=$(nuon apps sync 2>&1)
+  echo "$SYNC_OUTPUT"
   echo "    ✓ App synced"
   echo ""
 done
@@ -82,4 +79,9 @@ echo ""
 echo "Org Name: $ORG_NAME"
 echo "Org ID: $ORG_ID"
 echo "Apps created: ${APPS[*]}"
+echo ""
+
+echo "🧹 Cleaning up temporary files..."
+rm -rf "$REPO_DIR"
+echo "✓ Cleanup complete"
 echo ""
