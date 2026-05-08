@@ -2,16 +2,10 @@
 set -euo pipefail
 
 APPS=(
-  "coder"
   "httpbin"
-  "ecs-simple"
-  "eks-simple"
-  "aws-lambda"
-  "uptime-monitor"
 )
 
-REPO_URL="https://github.com/nuonco/example-app-configs.git"
-REPO_DIR="/tmp/example-app-configs"
+REPO_DIR="$HOME/nuonco/example-app-configs"
 
 # Get org name from argument or use default
 ORG_NAME="${1:-Demo Test Setup}"
@@ -41,20 +35,6 @@ nuon orgs select --org "$ORG_ID"
 echo "✓ Org selected"
 
 echo ""
-echo "📥 Cloning/updating example-app-configs repo..."
-if [ -d "$REPO_DIR" ]; then
-  cd "$REPO_DIR"
-  git checkout main > /dev/null 2>&1
-  git pull > /dev/null 2>&1
-  echo "✓ Repository updated"
-else
-  git clone "$REPO_URL" "$REPO_DIR" > /dev/null 2>&1
-  cd "$REPO_DIR"
-  git checkout main > /dev/null 2>&1
-  echo "✓ Repository cloned"
-fi
-
-echo ""
 echo "🚀 Creating and syncing apps..."
 echo ""
 
@@ -67,10 +47,12 @@ for app in "${APPS[@]}"; do
   cd "$REPO_DIR/$app"
   
   echo "  📱 $app"
-  nuon apps create --name "$app" > /dev/null 2>&1
+  APP_OUTPUT=$(nuon apps create --name "$app" 2>&1)
+  echo "$APP_OUTPUT"
   echo "    ✓ App created"
   
-  nuon apps sync > /dev/null 2>&1
+  SYNC_OUTPUT=$(nuon apps sync 2>&1)
+  echo "$SYNC_OUTPUT"
   echo "    ✓ App synced"
   echo ""
 done
