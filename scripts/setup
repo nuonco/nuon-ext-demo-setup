@@ -5,7 +5,8 @@ APPS=(
   "httpbin"
 )
 
-REPO_DIR="$HOME/nuonco/example-app-configs"
+REPO_URL="https://github.com/nuonco/example-app-configs.git"
+REPO_DIR="/tmp/example-app-configs"
 
 # Get org name from argument or use default
 ORG_NAME="${1:-Demo Test Setup}"
@@ -33,6 +34,20 @@ echo ""
 echo "🔄 Selecting into new org..."
 nuon orgs select --org "$ORG_ID"
 echo "✓ Org selected"
+
+echo ""
+echo "📥 Cloning/updating example-app-configs repo..."
+if [ -d "$REPO_DIR" ]; then
+  cd "$REPO_DIR"
+  git checkout main > /dev/null 2>&1
+  git pull > /dev/null 2>&1
+  echo "✓ Repository updated"
+else
+  git clone "$REPO_URL" "$REPO_DIR" > /dev/null 2>&1
+  cd "$REPO_DIR"
+  git checkout main > /dev/null 2>&1
+  echo "✓ Repository cloned"
+fi
 
 echo ""
 echo "🚀 Creating and syncing apps..."
@@ -64,4 +79,9 @@ echo ""
 echo "Org Name: $ORG_NAME"
 echo "Org ID: $ORG_ID"
 echo "Apps created: ${APPS[*]}"
+echo ""
+
+echo "🧹 Cleaning up temporary files..."
+rm -rf "$REPO_DIR"
+echo "✓ Cleanup complete"
 echo ""
