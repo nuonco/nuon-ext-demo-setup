@@ -52,13 +52,17 @@ for app in "${APPS[@]}"; do
     continue
   fi
   
-  cd "$REPO_DIR/$app"
-  
   echo "  📱 $app"
+  echo "    → Changing to directory: $REPO_DIR/$app"
+  cd "$REPO_DIR/$app"
+  echo "    → Directory changed successfully"
+  
+  echo "    → Running: nuon apps create --name $app"
   APP_OUTPUT=$(nuon apps create --name "$app" 2>&1)
   echo "$APP_OUTPUT"
   echo "    ✓ App created"
   
+  echo "    → Running: nuon apps sync"
   SYNC_OUTPUT=$(nuon apps sync 2>&1)
   echo "$SYNC_OUTPUT"
   echo "    ✓ App synced"
