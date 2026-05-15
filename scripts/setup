@@ -66,6 +66,11 @@ for app in "${APPS[@]}"; do
   SYNC_OUTPUT=$(nuon apps sync 2>&1)
   echo "$SYNC_OUTPUT"
   echo "    ✓ App synced"
+  
+  echo "    → Creating install: test-2"
+  INSTALL_OUTPUT=$(nuon installs create --name test-2 --region us-west-2 2>&1)
+  echo "$INSTALL_OUTPUT"
+  echo "    ✓ Install created"
   echo ""
 done
 
