@@ -23,6 +23,38 @@ echo ""
 echo "💡 Tip: Watch logs in another terminal with: tail -f $LOG_FILE"
 echo ""
 
+# Prompt for AWS profile name
+echo "🔐 AWS Profile Setup"
+echo ""
+read -p "Enter your AWS profile name (e.g., your-account.RoleName): " AWS_PROFILE_INPUT
+echo ""
+
+# Set the AWS profile
+export AWS_PROFILE="$AWS_PROFILE_INPUT"
+echo "[$(date)] User entered AWS profile: $AWS_PROFILE" >> "$LOG_FILE"
+
+# Show the profile
+echo "Current AWS Profile:"
+echo $AWS_PROFILE
+echo ""
+
+# Prompt for confirmation
+read -p "Proceed with this AWS profile? (y/n): " -n 1 -r
+echo ""
+
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+  echo ""
+  echo "Please configure your AWS credentials and re-run this extension."
+  echo ""
+  echo "Exiting..."
+  echo "[$(date)] User declined to proceed with AWS profile" >> "$LOG_FILE"
+  exit 0
+fi
+
+echo "✓ Proceeding with profile: $AWS_PROFILE"
+echo "[$(date)] User confirmed AWS profile: $AWS_PROFILE" >> "$LOG_FILE"
+echo ""
+
 echo "📦 Creating demo org: $ORG_NAME"
 echo "[$(date)] Creating org: $ORG_NAME" >> "$LOG_FILE"
 ORG_OUTPUT=$(nuon orgs create --name "$ORG_NAME" 2>&1)
