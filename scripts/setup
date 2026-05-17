@@ -56,8 +56,13 @@ echo "[$(date)] User confirmed AWS profile: $AWS_PROFILE" >> "$LOG_FILE"
 echo ""
 
 echo "📦 Creating demo org: $ORG_NAME"
-echo "[$(date)] Creating org: $ORG_NAME" >> "$LOG_FILE"
-ORG_OUTPUT=$(nuon orgs create --name "$ORG_NAME" 2>&1)
+echo "[$(date)] STEP: Creating org: $ORG_NAME" >> "$LOG_FILE"
+if ! ORG_OUTPUT=$(nuon orgs create --name "$ORG_NAME" 2>&1); then
+  echo "❌ Failed to create org"
+  echo "[$(date)] ERROR: Failed to create org" >> "$LOG_FILE"
+  echo "[$(date)] ERROR OUTPUT: $ORG_OUTPUT" >> "$LOG_FILE"
+  exit 1
+fi
 echo "$ORG_OUTPUT"
 echo "[$(date)] Org output: $ORG_OUTPUT" >> "$LOG_FILE"
 
@@ -66,27 +71,36 @@ ORG_ID=$(echo "$ORG_OUTPUT" | grep -o 'org[a-z0-9]\+' | tail -1)
 
 if [ -z "$ORG_ID" ]; then
   echo "❌ Failed to extract org ID from output"
+  echo "[$(date)] ERROR: Failed to extract org ID" >> "$LOG_FILE"
   exit 1
 fi
 
 echo "✓ Org created successfully (ID: $ORG_ID)"
-echo "[$(date)] Org created: $ORG_ID" >> "$LOG_FILE"
+echo "[$(date)] SUCCESS: Org created: $ORG_ID" >> "$LOG_FILE"
 
 echo ""
 echo "🔄 Selecting into new org..."
-echo "[$(date)] Selecting org: $ORG_ID" >> "$LOG_FILE"
-nuon orgs select --org "$ORG_ID"
+echo "[$(date)] STEP: Selecting org: $ORG_ID" >> "$LOG_FILE"
+if ! nuon orgs select --org "$ORG_ID" 2>&1; then
+  echo "❌ Failed to select org"
+  echo "[$(date)] ERROR: Failed to select org $ORG_ID" >> "$LOG_FILE"
+  exit 1
+fi
 echo "✓ Org selected"
-echo "[$(date)] Org selected" >> "$LOG_FILE"
+echo "[$(date)] SUCCESS: Org selected" >> "$LOG_FILE"
 
 echo ""
 echo "📥 Cloning example-app-configs repo..."
-echo "[$(date)] Cloning repo from $REPO_URL" >> "$LOG_FILE"
+echo "[$(date)] STEP: Cloning repo from $REPO_URL" >> "$LOG_FILE"
 rm -rf "$REPO_DIR"
-git clone "$REPO_URL" "$REPO_DIR"
+if ! git clone "$REPO_URL" "$REPO_DIR" 2>&1; then
+  echo "❌ Failed to clone repository"
+  echo "[$(date)] ERROR: Failed to clone repo from $REPO_URL" >> "$LOG_FILE"
+  exit 1
+fi
 cd "$REPO_DIR"
 echo "✓ Repository cloned"
-echo "[$(date)] Repo cloned successfully" >> "$LOG_FILE"
+echo "[$(date)] SUCCESS: Repo cloned successfully" >> "$LOG_FILE"
 
 echo ""
 echo "🚀 Creating and syncing apps..."
@@ -101,27 +115,46 @@ for app in "${APPS[@]}"; do
   
   echo "  📱 $app"
   echo "    → Changing to directory: $REPO_DIR/$app"
-  echo "[$(date)] Processing app: $app" >> "$LOG_FILE"
-  cd "$REPO_DIR/$app"
+  echo "[$(date)] STEP: Processing app: $app" >> "$LOG_FILE"
+  if ! cd "$REPO_DIR/$app" 2>&1; then
+    echo "    ❌ Failed to change directory"
+    echo "[$(date)] ERROR: Failed to cd to $REPO_DIR/$app" >> "$LOG_FILE"
+    exit 1
+  fi
   echo "    → Directory changed successfully"
   
   echo "    → Running: nuon apps create --name $app"
-  echo "[$(date)] Creating app: $app" >> "$LOG_FILE"
-  APP_OUTPUT=$(nuon apps create --name "$app" 2>&1)
+  echo "[$(date)] STEP: Creating app: $app" >> "$LOG_FILE"
+  if ! APP_OUTPUT=$(nuon apps create --name "$app" 2>&1); then
+    echo "    ❌ Failed to create app"
+    echo "[$(date)] ERROR: Failed to create app $app" >> "$LOG_FILE"
+    echo "[$(date)] ERROR OUTPUT: $APP_OUTPUT" >> "$LOG_FILE"
+    exit 1
+  fi
   echo "$APP_OUTPUT"
   echo "    ✓ App created"
-  echo "[$(date)] App created successfully" >> "$LOG_FILE"
+  echo "[$(date)] SUCCESS: App created successfully" >> "$LOG_FILE"
   
   echo "    → Running: nuon apps sync"
-  echo "[$(date)] Syncing app: $app" >> "$LOG_FILE"
-  SYNC_OUTPUT=$(nuon apps sync 2>&1)
+  echo "[$(date)] STEP: Syncing app: $app" >> "$LOG_FILE"
+  if ! SYNC_OUTPUT=$(nuon apps sync 2>&1); then
+    echo "    ❌ Failed to sync app"
+    echo "[$(date)] ERROR: Failed to sync app $app" >> "$LOG_FILE"
+    echo "[$(date)] ERROR OUTPUT: $SYNC_OUTPUT" >> "$LOG_FILE"
+    exit 1
+  fi
   echo "$SYNC_OUTPUT"
   echo "    ✓ App synced"
-  echo "[$(date)] App synced successfully" >> "$LOG_FILE"
+  echo "[$(date)] SUCCESS: App synced successfully" >> "$LOG_FILE"
   
   echo "    → Creating install: test-2"
-  echo "[$(date)] Creating install: test-2" >> "$LOG_FILE"
-  INSTALL_OUTPUT=$(nuon installs create --name test-2 --region us-west-2 2>&1)
+  echo "[$(date)] STEP: Creating install: test-2" >> "$LOG_FILE"
+  if ! INSTALL_OUTPUT=$(nuon installs create --name test-2 --region us-west-2 2>&1); then
+    echo "    ❌ Failed to create install"
+    echo "[$(date)] ERROR: Failed to create install" >> "$LOG_FILE"
+    echo "[$(date)] ERROR OUTPUT: $INSTALL_OUTPUT" >> "$LOG_FILE"
+    exit 1
+  fi
   echo "$INSTALL_OUTPUT"
   
   # Extract install ID from output
@@ -134,23 +167,23 @@ for app in "${APPS[@]}"; do
   fi
   
   echo "    ✓ Install created (ID: $INSTALL_ID)"
-  echo "[$(date)] Install created: $INSTALL_ID" >> "$LOG_FILE"
+  echo "[$(date)] SUCCESS: Install created: $INSTALL_ID" >> "$LOG_FILE"
   
   echo "    → Getting workflow ID..."
-  echo "[$(date)] Fetching workflow ID for install: $INSTALL_ID" >> "$LOG_FILE"
+  echo "[$(date)] STEP: Fetching workflow ID for install: $INSTALL_ID" >> "$LOG_FILE"
   WORKFLOW_ID=$(nuon installs workflows list -i "$INSTALL_ID" -j 2>/dev/null | jq -r '.[0].id')
   
   if [ -z "$WORKFLOW_ID" ] || [ "$WORKFLOW_ID" = "null" ]; then
     echo "    ❌ Failed to get workflow ID"
-    echo "[$(date)] ERROR: Failed to get workflow ID" >> "$LOG_FILE"
+    echo "[$(date)] ERROR: Failed to get workflow ID for install $INSTALL_ID" >> "$LOG_FILE"
     exit 1
   fi
   
   echo "    ✓ Workflow ID: $WORKFLOW_ID"
-  echo "[$(date)] Workflow ID: $WORKFLOW_ID" >> "$LOG_FILE"
+  echo "[$(date)] SUCCESS: Workflow ID retrieved: $WORKFLOW_ID" >> "$LOG_FILE"
   
   echo "    → Waiting for 'await install stack' step to be in-progress..."
-  echo "[$(date)] Polling for 'await install stack' step" >> "$LOG_FILE"
+  echo "[$(date)] STEP: Polling for 'await install stack' step" >> "$LOG_FILE"
   
   MAX_POLLS=60
   POLL_COUNT=0
@@ -168,7 +201,7 @@ for app in "${APPS[@]}"; do
     if [ "$STEP_STATUS" = "in-progress" ] || [ "$STEP_STATUS" = "queued" ]; then
       STEP_FOUND=true
       echo "    ✓ 'await install stack' step is now $STEP_STATUS"
-      echo "[$(date)] Step found with status: $STEP_STATUS" >> "$LOG_FILE"
+      echo "[$(date)] SUCCESS: Step found with status: $STEP_STATUS" >> "$LOG_FILE"
       break
     fi
     
@@ -178,13 +211,29 @@ for app in "${APPS[@]}"; do
   
   if [ "$STEP_FOUND" = false ]; then
     echo "    ⚠️  Timeout waiting for 'await install stack' step"
-    echo "[$(date)] WARNING: Timeout waiting for step" >> "$LOG_FILE"
+    echo "[$(date)] ERROR: Timeout waiting for 'await install stack' step after $MAX_POLLS polls" >> "$LOG_FILE"
   else
     echo "    → Waiting additional 60 seconds for step to fully load..."
-    echo "[$(date)] Waiting 60 seconds for step to stabilize" >> "$LOG_FILE"
+    echo "[$(date)] STEP: Waiting 60 seconds for step to stabilize" >> "$LOG_FILE"
     sleep 60
     echo "    ✓ Wait complete"
-    echo "[$(date)] Wait complete, ready for next step" >> "$LOG_FILE"
+    echo "[$(date)] SUCCESS: Wait complete, ready for cf-stack" >> "$LOG_FILE"
+    
+    echo "    → Running CloudFormation stack installation..."
+    echo "[$(date)] STEP: Creating temp inputs.json and running cf-stack" >> "$LOG_FILE"
+    
+    # Create temp inputs file
+    INPUTS_FILE="/tmp/nuon-demo-inputs.json"
+    echo '{}' > "$INPUTS_FILE"
+    
+    # Run cf-stack install in background (script doesn't wait for it to finish)
+    nuon cf-stack install --install-id "$INSTALL_ID" --inputs "$INPUTS_FILE" > /dev/null 2>&1 &
+    
+    # Wait 10 seconds
+    sleep 10
+    
+    echo "[$(date)] SUCCESS: CF stack initiated" >> "$LOG_FILE"
+    echo "    ✓ CloudFormation stack installation initiated"
   fi
   
   echo ""
@@ -200,10 +249,12 @@ echo "Apps created: ${APPS[*]}"
 echo ""
 
 echo "🧹 Cleaning up temporary files..."
-echo "[$(date)] Cleaning up temporary files" >> "$LOG_FILE"
+echo "[$(date)] STEP: Cleaning up temporary files" >> "$LOG_FILE"
 rm -rf "$REPO_DIR"
+rm -f /tmp/nuon-demo-inputs.json
 echo "✓ Cleanup complete"
+echo "[$(date)] SUCCESS: Cleanup complete" >> "$LOG_FILE"
 
-echo "[$(date)] Demo setup completed successfully" >> "$LOG_FILE"
+echo "[$(date)] ========== DEMO SETUP COMPLETED SUCCESSFULLY ==========" >> "$LOG_FILE"
 rm -f "$LOG_FILE"
 echo ""
