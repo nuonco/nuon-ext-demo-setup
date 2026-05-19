@@ -7,40 +7,100 @@ APPS=(
 
 REPO_URL="https://github.com/nuonco/example-app-configs.git"
 REPO_DIR="/tmp/example-app-configs"
+LOG_FILE="/tmp/nuon-demo-setup.log"
 
 # Get org name from argument or use default
 ORG_NAME="${1:-Demo Test Setup}"
+
+# Initialize log file
+rm -f "$LOG_FILE"
+echo "[$(date)] Demo setup started" >> "$LOG_FILE"
 
 echo "========================================="
 echo "  Nuon Demo Environment Setup"
 echo "========================================="
 echo ""
+echo "💡 Tip: Watch logs in another terminal with: tail -f $LOG_FILE"
+echo ""
+
+# Prompt for AWS profile name
+echo "🔐 AWS Profile Setup"
+echo ""
+read -p "Enter your AWS profile name (e.g., your-account.RoleName): " AWS_PROFILE_INPUT
+echo ""
+
+# Set the AWS profile
+export AWS_PROFILE="$AWS_PROFILE_INPUT"
+echo "[$(date)] User entered AWS profile: $AWS_PROFILE" >> "$LOG_FILE"
+
+# Show the profile
+echo "Current AWS Profile:"
+echo $AWS_PROFILE
+echo ""
+
+# Prompt for confirmation
+read -p "Proceed with this AWS profile? (y/n): " -n 1 -r
+echo ""
+
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+  echo ""
+  echo "Please configure your AWS credentials and re-run this extension."
+  echo ""
+  echo "Exiting..."
+  echo "[$(date)] User declined to proceed with AWS profile" >> "$LOG_FILE"
+  exit 0
+fi
+
+echo "✓ Proceeding with profile: $AWS_PROFILE"
+echo "[$(date)] User confirmed AWS profile: $AWS_PROFILE" >> "$LOG_FILE"
+echo ""
 
 echo "📦 Creating demo org: $ORG_NAME"
-ORG_OUTPUT=$(nuon orgs create --name "$ORG_NAME" 2>&1)
+echo "[$(date)] STEP: Creating org: $ORG_NAME" >> "$LOG_FILE"
+if ! ORG_OUTPUT=$(nuon orgs create --name "$ORG_NAME" 2>&1); then
+  echo "❌ Failed to create org"
+  echo "[$(date)] ERROR: Failed to create org" >> "$LOG_FILE"
+  echo "[$(date)] ERROR OUTPUT: $ORG_OUTPUT" >> "$LOG_FILE"
+  exit 1
+fi
 echo "$ORG_OUTPUT"
+echo "[$(date)] Org output: $ORG_OUTPUT" >> "$LOG_FILE"
 
 # Extract org ID from output (format: "current org is now Name: orgid")
 ORG_ID=$(echo "$ORG_OUTPUT" | grep -o 'org[a-z0-9]\+' | tail -1)
 
 if [ -z "$ORG_ID" ]; then
   echo "❌ Failed to extract org ID from output"
+  echo "[$(date)] ERROR: Failed to extract org ID" >> "$LOG_FILE"
   exit 1
 fi
 
 echo "✓ Org created successfully (ID: $ORG_ID)"
+echo "[$(date)] SUCCESS: Org created: $ORG_ID" >> "$LOG_FILE"
 
 echo ""
 echo "🔄 Selecting into new org..."
-nuon orgs select --org "$ORG_ID"
+echo "[$(date)] STEP: Selecting org: $ORG_ID" >> "$LOG_FILE"
+if ! nuon orgs select --org "$ORG_ID" 2>&1; then
+  echo "❌ Failed to select org"
+  echo "[$(date)] ERROR: Failed to select org $ORG_ID" >> "$LOG_FILE"
+  exit 1
+fi
 echo "✓ Org selected"
+echo "[$(date)] SUCCESS: Org selected" >> "$LOG_FILE"
 
 echo ""
 echo "📥 Cloning example-app-configs repo..."
+echo "[$(date)] STEP: Cloning repo from $REPO_URL" >> "$LOG_FILE"
 rm -rf "$REPO_DIR"
-git clone "$REPO_URL" "$REPO_DIR"
+if ! git clone "$REPO_URL" "$REPO_DIR" 2>&1; then
+  echo "❌ Failed to clone repository"
+  echo "[$(date)] ERROR: Failed to clone repo from $REPO_URL" >> "$LOG_FILE"
+  exit 1
+fi
 cd "$REPO_DIR"
 echo "✓ Repository cloned"
+echo "[$(date)] SUCCESS: Repo cloned successfully" >> "$LOG_FILE"
 
 echo ""
 echo "🚀 Creating and syncing apps..."
@@ -49,19 +109,133 @@ echo ""
 for app in "${APPS[@]}"; do
   if [ ! -d "$REPO_DIR/$app" ]; then
     echo "  ⚠️  Warning: Directory for $app not found, skipping..."
+    echo "[$(date)] App directory not found: $app" >> "$LOG_FILE"
     continue
   fi
   
-  cd "$REPO_DIR/$app"
-  
   echo "  📱 $app"
-  APP_OUTPUT=$(nuon apps create --name "$app" 2>&1)
+  echo "    → Changing to directory: $REPO_DIR/$app"
+  echo "[$(date)] STEP: Processing app: $app" >> "$LOG_FILE"
+  if ! cd "$REPO_DIR/$app" 2>&1; then
+    echo "    ❌ Failed to change directory"
+    echo "[$(date)] ERROR: Failed to cd to $REPO_DIR/$app" >> "$LOG_FILE"
+    exit 1
+  fi
+  echo "    → Directory changed successfully"
+  
+  echo "    → Running: nuon apps create --name $app"
+  echo "[$(date)] STEP: Creating app: $app" >> "$LOG_FILE"
+  if ! APP_OUTPUT=$(nuon apps create --name "$app" 2>&1); then
+    echo "    ❌ Failed to create app"
+    echo "[$(date)] ERROR: Failed to create app $app" >> "$LOG_FILE"
+    echo "[$(date)] ERROR OUTPUT: $APP_OUTPUT" >> "$LOG_FILE"
+    exit 1
+  fi
   echo "$APP_OUTPUT"
   echo "    ✓ App created"
+  echo "[$(date)] SUCCESS: App created successfully" >> "$LOG_FILE"
   
-  SYNC_OUTPUT=$(nuon apps sync 2>&1)
+  echo "    → Running: nuon apps sync"
+  echo "[$(date)] STEP: Syncing app: $app" >> "$LOG_FILE"
+  if ! SYNC_OUTPUT=$(nuon apps sync 2>&1); then
+    echo "    ❌ Failed to sync app"
+    echo "[$(date)] ERROR: Failed to sync app $app" >> "$LOG_FILE"
+    echo "[$(date)] ERROR OUTPUT: $SYNC_OUTPUT" >> "$LOG_FILE"
+    exit 1
+  fi
   echo "$SYNC_OUTPUT"
   echo "    ✓ App synced"
+  echo "[$(date)] SUCCESS: App synced successfully" >> "$LOG_FILE"
+  
+  echo "    → Creating install: test-2"
+  echo "[$(date)] STEP: Creating install: test-2" >> "$LOG_FILE"
+  if ! INSTALL_OUTPUT=$(nuon installs create --name test-2 --region us-west-2 2>&1); then
+    echo "    ❌ Failed to create install"
+    echo "[$(date)] ERROR: Failed to create install" >> "$LOG_FILE"
+    echo "[$(date)] ERROR OUTPUT: $INSTALL_OUTPUT" >> "$LOG_FILE"
+    exit 1
+  fi
+  echo "$INSTALL_OUTPUT"
+  
+  # Extract install ID from output
+  INSTALL_ID=$(echo "$INSTALL_OUTPUT" | grep -o 'inl[a-z0-9]\+' | head -1)
+  
+  if [ -z "$INSTALL_ID" ]; then
+    echo "    ❌ Failed to extract install ID from output"
+    echo "[$(date)] ERROR: Failed to extract install ID" >> "$LOG_FILE"
+    exit 1
+  fi
+  
+  echo "    ✓ Install created (ID: $INSTALL_ID)"
+  echo "[$(date)] SUCCESS: Install created: $INSTALL_ID" >> "$LOG_FILE"
+  
+  echo "    → Getting workflow ID..."
+  echo "[$(date)] STEP: Fetching workflow ID for install: $INSTALL_ID" >> "$LOG_FILE"
+  WORKFLOW_ID=$(nuon installs workflows list -i "$INSTALL_ID" -j 2>/dev/null | jq -r '.[0].id')
+  
+  if [ -z "$WORKFLOW_ID" ] || [ "$WORKFLOW_ID" = "null" ]; then
+    echo "    ❌ Failed to get workflow ID"
+    echo "[$(date)] ERROR: Failed to get workflow ID for install $INSTALL_ID" >> "$LOG_FILE"
+    exit 1
+  fi
+  
+  echo "    ✓ Workflow ID: $WORKFLOW_ID"
+  echo "[$(date)] SUCCESS: Workflow ID retrieved: $WORKFLOW_ID" >> "$LOG_FILE"
+  
+  echo "    → Waiting for 'await install stack' step to be in-progress..."
+  echo "[$(date)] STEP: Polling for 'await install stack' step" >> "$LOG_FILE"
+  
+  MAX_POLLS=60
+  POLL_COUNT=0
+  STEP_FOUND=false
+  
+  while [ $POLL_COUNT -lt $MAX_POLLS ]; do
+    POLL_COUNT=$((POLL_COUNT + 1))
+    
+    # Get workflow status
+    WORKFLOW_JSON=$(nuon installs workflows -i "$INSTALL_ID" -w "$WORKFLOW_ID" -j 2>/dev/null)
+    
+    # Check if "await install stack" step is in-progress
+    STEP_STATUS=$(echo "$WORKFLOW_JSON" | jq -r '.step_groups[].steps[] | select(.name == "await install stack") | .status.status' 2>/dev/null | head -1)
+    
+    if [ "$STEP_STATUS" = "in-progress" ] || [ "$STEP_STATUS" = "queued" ]; then
+      STEP_FOUND=true
+      echo "    ✓ 'await install stack' step is now $STEP_STATUS"
+      echo "[$(date)] SUCCESS: Step found with status: $STEP_STATUS" >> "$LOG_FILE"
+      break
+    fi
+    
+    echo "[$(date)] Poll $POLL_COUNT/$MAX_POLLS - Step status: $STEP_STATUS" >> "$LOG_FILE"
+    sleep 5
+  done
+  
+  if [ "$STEP_FOUND" = false ]; then
+    echo "    ⚠️  Timeout waiting for 'await install stack' step"
+    echo "[$(date)] ERROR: Timeout waiting for 'await install stack' step after $MAX_POLLS polls" >> "$LOG_FILE"
+  else
+    echo "    → Waiting additional 60 seconds for step to fully load..."
+    echo "[$(date)] STEP: Waiting 60 seconds for step to stabilize" >> "$LOG_FILE"
+    sleep 60
+    echo "    ✓ Wait complete"
+    echo "[$(date)] SUCCESS: Wait complete, ready for cf-stack" >> "$LOG_FILE"
+    
+    echo "    → Running CloudFormation stack installation..."
+    echo "[$(date)] STEP: Creating temp inputs.json and running cf-stack" >> "$LOG_FILE"
+    
+    # Create temp inputs file
+    INPUTS_FILE="/tmp/nuon-demo-inputs.json"
+    echo '{}' > "$INPUTS_FILE"
+    
+    # Run cf-stack install in background (script doesn't wait for it to finish)
+    nuon cf-stack install --install-id "$INSTALL_ID" --inputs "$INPUTS_FILE" > /dev/null 2>&1 &
+    
+    # Wait 10 seconds
+    sleep 10
+    
+    echo "[$(date)] SUCCESS: CF stack initiated" >> "$LOG_FILE"
+    echo "    ✓ CloudFormation stack installation initiated"
+  fi
+  
   echo ""
 done
 
@@ -75,6 +249,12 @@ echo "Apps created: ${APPS[*]}"
 echo ""
 
 echo "🧹 Cleaning up temporary files..."
+echo "[$(date)] STEP: Cleaning up temporary files" >> "$LOG_FILE"
 rm -rf "$REPO_DIR"
+rm -f /tmp/nuon-demo-inputs.json
 echo "✓ Cleanup complete"
+echo "[$(date)] SUCCESS: Cleanup complete" >> "$LOG_FILE"
+
+echo "[$(date)] ========== DEMO SETUP COMPLETED SUCCESSFULLY ==========" >> "$LOG_FILE"
+rm -f "$LOG_FILE"
 echo ""
