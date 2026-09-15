@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+EXT_DIR="${NUON_EXT_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
+# shellcheck source=./scripts/lib.sh
+source "$EXT_DIR/scripts/lib.sh"
+
+unset NUON_APP_ID NUON_INSTALL_ID
+
+ORG_ID="${1:?usage: nuon demo-setup teardown <org-id>}"
+export NUON_ORG_ID="$ORG_ID"
+STATE_DIR="$DEMO_STATE_DIR/$ORG_ID"
+LOG_FILE="$STATE_DIR/teardown.log"
+
+[ -d "$STATE_DIR" ] || die "no state for $ORG_ID under $DEMO_STATE_DIR"
+for tool in "$NUON_BIN" terraform jq curl; do
+  need "$tool"
+done
+[ -n "${NUON_API_TOKEN:-}" ] || die "NUON_API_TOKEN not set"
+[ -n "${NUON_API_URL:-}" ] || die "NUON_API_URL not set"
+
+shopt -s nullglob
+state_dirs=("$STATE_DIR"/inl*/)
+[ "${#state_dirs[@]}" -gt 0 ] || die "no install state found for $ORG_ID"
+
+for tfdir in "${state_dirs[@]}"; do
+  INSTALL_ID="$(basename "$tfdir")"
+  sa="$(api_get "/v1/stacks/$INSTALL_ID/service-account")" ||
+    die "$INSTALL_ID: cannot resolve stack service account"
+  STACK_TOKEN="$(nuon_data service-accounts tokens create \
+    --id "$(jq -r .account_id <<<"$sa")" --duration 24h | jq -r .token)"
+
+  log "$INSTALL_ID: terraform destroy"
+  (
+    cd "$tfdir"
+    NUON_API_TOKEN="$STACK_TOKEN" terraform destroy -input=false -auto-approve -no-color 2>&1 |
+      tee -a "$LOG_FILE"
+  ) || die "$INSTALL_ID: destroy failed; fix in $tfdir and re-run"
+
+  "$NUON_BIN" --output agent installs delete -i "$INSTALL_ID" --confirm \
+    >>"$LOG_FILE" 2>&1 || log "$INSTALL_ID: installs delete failed (continuing)"
+  rm -rf "$tfdir"
+done
+
+log "installs destroyed. The org $ORG_ID remains; remove it from the admin dashboard if needed."

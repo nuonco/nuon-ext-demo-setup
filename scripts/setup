@@ -1,260 +1,110 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APPS=(
-  "httpbin"
-)
+EXT_DIR="${NUON_EXT_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
+# shellcheck source=./scripts/lib.sh
+source "$EXT_DIR/scripts/lib.sh"
 
+unset NUON_APP_ID NUON_INSTALL_ID
+
+ORG_NAME="${1:-Acme Demo}"
+DEMO_APPS="${DEMO_APPS:-httpbin gcp-httpbin}"
+DEMO_AWS_REGION="${DEMO_AWS_REGION:-us-west-2}"
+DEMO_GCP_REGION="${DEMO_GCP_REGION:-us-central1}"
+DEMO_STACK_WAIT_SECS="${DEMO_STACK_WAIT_SECS:-600}"
 REPO_URL="https://github.com/nuonco/example-app-configs.git"
-REPO_DIR="/tmp/example-app-configs"
-LOG_FILE="/tmp/nuon-demo-setup.log"
+LOG_FILE="$(mktemp -t nuon-demo-setup.XXXXXX.log)"
 
-# Get org name from argument or use default
-ORG_NAME="${1:-Demo Test Setup}"
+for tool in "$NUON_BIN" terraform jq git curl aws; do
+  need "$tool"
+done
+[ -n "${NUON_API_TOKEN:-}" ] || die "NUON_API_TOKEN not set (run through the extension after nuon auth login)"
+[ -n "${NUON_API_URL:-}" ] || die "NUON_API_URL not set"
 
-# Initialize log file
-rm -f "$LOG_FILE"
-echo "[$(date)] Demo setup started" >> "$LOG_FILE"
+if [ -z "${AWS_PROFILE:-}" ] && ! aws sts get-caller-identity >/dev/null 2>&1; then
+  read -r -p "AWS profile to provision into: " AWS_PROFILE
+  export AWS_PROFILE
+fi
+aws sts get-caller-identity >/dev/null 2>&1 ||
+  die "AWS credentials not usable (AWS_PROFILE=${AWS_PROFILE:-unset})"
 
-echo "========================================="
-echo "  Nuon Demo Environment Setup"
-echo "========================================="
-echo ""
-echo "💡 Tip: Watch logs in another terminal with: tail -f $LOG_FILE"
-echo ""
-
-# Prompt for AWS profile name
-echo "🔐 AWS Profile Setup"
-echo ""
-read -p "Enter your AWS profile name (e.g., your-account.RoleName): " AWS_PROFILE_INPUT
-echo ""
-
-# Set the AWS profile
-export AWS_PROFILE="$AWS_PROFILE_INPUT"
-echo "[$(date)] User entered AWS profile: $AWS_PROFILE" >> "$LOG_FILE"
-
-# Show the profile
-echo "Current AWS Profile:"
-echo $AWS_PROFILE
-echo ""
-
-# Prompt for confirmation
-read -p "Proceed with this AWS profile? (y/n): " -n 1 -r
-echo ""
-
-if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-  echo ""
-  echo "Please configure your AWS credentials and re-run this extension."
-  echo ""
-  echo "Exiting..."
-  echo "[$(date)] User declined to proceed with AWS profile" >> "$LOG_FILE"
-  exit 0
+GCP_PROJECT="${GOOGLE_PROJECT:-${CLOUDSDK_CORE_PROJECT:-}}"
+if [ -z "$GCP_PROJECT" ] && command -v gcloud >/dev/null 2>&1; then
+  GCP_PROJECT="$(gcloud config get-value project 2>/dev/null || true)"
 fi
 
-echo "✓ Proceeding with profile: $AWS_PROFILE"
-echo "[$(date)] User confirmed AWS profile: $AWS_PROFILE" >> "$LOG_FILE"
-echo ""
+ORG_ID="$(nuon_data orgs create -n "$ORG_NAME" --no-select | jq -r .id)"
+[ -n "$ORG_ID" ] && [ "$ORG_ID" != null ] || die "org creation returned no id"
+export NUON_ORG_ID="$ORG_ID"
+STATE_DIR="$DEMO_STATE_DIR/$ORG_ID"
+mkdir -p "$STATE_DIR"
+mv "$LOG_FILE" "$STATE_DIR/setup.log"
+LOG_FILE="$STATE_DIR/setup.log"
+log "org $ORG_NAME created: $ORG_ID (log: $LOG_FILE)"
 
-echo "📦 Creating demo org: $ORG_NAME"
-echo "[$(date)] STEP: Creating org: $ORG_NAME" >> "$LOG_FILE"
-if ! ORG_OUTPUT=$(nuon orgs create --name "$ORG_NAME" 2>&1); then
-  echo "❌ Failed to create org"
-  echo "[$(date)] ERROR: Failed to create org" >> "$LOG_FILE"
-  echo "[$(date)] ERROR OUTPUT: $ORG_OUTPUT" >> "$LOG_FILE"
-  exit 1
-fi
-echo "$ORG_OUTPUT"
-echo "[$(date)] Org output: $ORG_OUTPUT" >> "$LOG_FILE"
+WORK="$(mktemp -d -t nuon-demo.XXXXXX)"
+trap 'rm -rf "$WORK"' EXIT
+git clone --quiet --depth 1 "$REPO_URL" "$WORK/configs"
 
-# Extract org ID from output (format: "current org is now Name: orgid")
-ORG_ID=$(echo "$ORG_OUTPUT" | grep -o 'org[a-z0-9]\+' | tail -1)
+for app in $DEMO_APPS; do
+  dir="$WORK/configs/$app"
+  [ -d "$dir" ] || die "no such example app: $app"
+  cloud="$(awk '/^cloud:/{print $2}' "$dir/.meta.yaml")"
+  case "$cloud" in
+    aws)
+      region="$DEMO_AWS_REGION"
+      ;;
+    gcp)
+      region="$DEMO_GCP_REGION"
+      if [ -z "$GCP_PROJECT" ]; then
+        log "skipping $app: no GCP project (set GOOGLE_PROJECT)"
+        continue
+      fi
+      ;;
+    *)
+      die "$app: unsupported cloud '$cloud' (only aws or gcp)"
+      ;;
+  esac
 
-if [ -z "$ORG_ID" ]; then
-  echo "❌ Failed to extract org ID from output"
-  echo "[$(date)] ERROR: Failed to extract org ID" >> "$LOG_FILE"
-  exit 1
-fi
+  log "$app: syncing config"
+  "$NUON_BIN" --output agent apps sync "$dir" --create --force --no-wait -a "$app" \
+    >>"$LOG_FILE" 2>&1 || die "$app: apps sync failed (see $LOG_FILE)"
 
-echo "✓ Org created successfully (ID: $ORG_ID)"
-echo "[$(date)] SUCCESS: Org created: $ORG_ID" >> "$LOG_FILE"
+  INSTALL_ID="$(nuon_data installs create -a "$app" -n "demo-$app" -r "$region" --no-select | jq -r .id)"
+  [ -n "$INSTALL_ID" ] && [ "$INSTALL_ID" != null ] || die "$app: install creation returned no id"
+  log "$app: install $INSTALL_ID created in $region"
 
-echo ""
-echo "🔄 Selecting into new org..."
-echo "[$(date)] STEP: Selecting org: $ORG_ID" >> "$LOG_FILE"
-if ! nuon orgs select --org "$ORG_ID" 2>&1; then
-  echo "❌ Failed to select org"
-  echo "[$(date)] ERROR: Failed to select org $ORG_ID" >> "$LOG_FILE"
-  exit 1
-fi
-echo "✓ Org selected"
-echo "[$(date)] SUCCESS: Org selected" >> "$LOG_FILE"
-
-echo ""
-echo "📥 Cloning example-app-configs repo..."
-echo "[$(date)] STEP: Cloning repo from $REPO_URL" >> "$LOG_FILE"
-rm -rf "$REPO_DIR"
-if ! git clone "$REPO_URL" "$REPO_DIR" 2>&1; then
-  echo "❌ Failed to clone repository"
-  echo "[$(date)] ERROR: Failed to clone repo from $REPO_URL" >> "$LOG_FILE"
-  exit 1
-fi
-cd "$REPO_DIR"
-echo "✓ Repository cloned"
-echo "[$(date)] SUCCESS: Repo cloned successfully" >> "$LOG_FILE"
-
-echo ""
-echo "🚀 Creating and syncing apps..."
-echo ""
-
-for app in "${APPS[@]}"; do
-  if [ ! -d "$REPO_DIR/$app" ]; then
-    echo "  ⚠️  Warning: Directory for $app not found, skipping..."
-    echo "[$(date)] App directory not found: $app" >> "$LOG_FILE"
-    continue
-  fi
-  
-  echo "  📱 $app"
-  echo "    → Changing to directory: $REPO_DIR/$app"
-  echo "[$(date)] STEP: Processing app: $app" >> "$LOG_FILE"
-  if ! cd "$REPO_DIR/$app" 2>&1; then
-    echo "    ❌ Failed to change directory"
-    echo "[$(date)] ERROR: Failed to cd to $REPO_DIR/$app" >> "$LOG_FILE"
-    exit 1
-  fi
-  echo "    → Directory changed successfully"
-  
-  echo "    → Running: nuon apps create --name $app"
-  echo "[$(date)] STEP: Creating app: $app" >> "$LOG_FILE"
-  if ! APP_OUTPUT=$(nuon apps create --name "$app" 2>&1); then
-    echo "    ❌ Failed to create app"
-    echo "[$(date)] ERROR: Failed to create app $app" >> "$LOG_FILE"
-    echo "[$(date)] ERROR OUTPUT: $APP_OUTPUT" >> "$LOG_FILE"
-    exit 1
-  fi
-  echo "$APP_OUTPUT"
-  echo "    ✓ App created"
-  echo "[$(date)] SUCCESS: App created successfully" >> "$LOG_FILE"
-  
-  echo "    → Running: nuon apps sync"
-  echo "[$(date)] STEP: Syncing app: $app" >> "$LOG_FILE"
-  if ! SYNC_OUTPUT=$(nuon apps sync 2>&1); then
-    echo "    ❌ Failed to sync app"
-    echo "[$(date)] ERROR: Failed to sync app $app" >> "$LOG_FILE"
-    echo "[$(date)] ERROR OUTPUT: $SYNC_OUTPUT" >> "$LOG_FILE"
-    exit 1
-  fi
-  echo "$SYNC_OUTPUT"
-  echo "    ✓ App synced"
-  echo "[$(date)] SUCCESS: App synced successfully" >> "$LOG_FILE"
-  
-  echo "    → Creating install: test-2"
-  echo "[$(date)] STEP: Creating install: test-2" >> "$LOG_FILE"
-  if ! INSTALL_OUTPUT=$(nuon installs create --name test-2 --region us-west-2 2>&1); then
-    echo "    ❌ Failed to create install"
-    echo "[$(date)] ERROR: Failed to create install" >> "$LOG_FILE"
-    echo "[$(date)] ERROR OUTPUT: $INSTALL_OUTPUT" >> "$LOG_FILE"
-    exit 1
-  fi
-  echo "$INSTALL_OUTPUT"
-  
-  # Extract install ID from output
-  INSTALL_ID=$(echo "$INSTALL_OUTPUT" | grep -o 'inl[a-z0-9]\+' | head -1)
-  
-  if [ -z "$INSTALL_ID" ]; then
-    echo "    ❌ Failed to extract install ID from output"
-    echo "[$(date)] ERROR: Failed to extract install ID" >> "$LOG_FILE"
-    exit 1
-  fi
-  
-  echo "    ✓ Install created (ID: $INSTALL_ID)"
-  echo "[$(date)] SUCCESS: Install created: $INSTALL_ID" >> "$LOG_FILE"
-  
-  echo "    → Getting workflow ID..."
-  echo "[$(date)] STEP: Fetching workflow ID for install: $INSTALL_ID" >> "$LOG_FILE"
-  WORKFLOW_ID=$(nuon installs workflows list -i "$INSTALL_ID" -j 2>/dev/null | jq -r '.[0].id')
-  
-  if [ -z "$WORKFLOW_ID" ] || [ "$WORKFLOW_ID" = "null" ]; then
-    echo "    ❌ Failed to get workflow ID"
-    echo "[$(date)] ERROR: Failed to get workflow ID for install $INSTALL_ID" >> "$LOG_FILE"
-    exit 1
-  fi
-  
-  echo "    ✓ Workflow ID: $WORKFLOW_ID"
-  echo "[$(date)] SUCCESS: Workflow ID retrieved: $WORKFLOW_ID" >> "$LOG_FILE"
-  
-  echo "    → Waiting for 'await install stack' step to be in-progress..."
-  echo "[$(date)] STEP: Polling for 'await install stack' step" >> "$LOG_FILE"
-  
-  MAX_POLLS=60
-  POLL_COUNT=0
-  STEP_FOUND=false
-  
-  while [ $POLL_COUNT -lt $MAX_POLLS ]; do
-    POLL_COUNT=$((POLL_COUNT + 1))
-    
-    # Get workflow status
-    WORKFLOW_JSON=$(nuon installs workflows -i "$INSTALL_ID" -w "$WORKFLOW_ID" -j 2>/dev/null)
-    
-    # Check if "await install stack" step is in-progress
-    STEP_STATUS=$(echo "$WORKFLOW_JSON" | jq -r '.step_groups[].steps[] | select(.name == "await install stack") | .status.status' 2>/dev/null | head -1)
-    
-    if [ "$STEP_STATUS" = "in-progress" ] || [ "$STEP_STATUS" = "queued" ]; then
-      STEP_FOUND=true
-      echo "    ✓ 'await install stack' step is now $STEP_STATUS"
-      echo "[$(date)] SUCCESS: Step found with status: $STEP_STATUS" >> "$LOG_FILE"
-      break
-    fi
-    
-    echo "[$(date)] Poll $POLL_COUNT/$MAX_POLLS - Step status: $STEP_STATUS" >> "$LOG_FILE"
-    sleep 5
-  done
-  
-  if [ "$STEP_FOUND" = false ]; then
-    echo "    ⚠️  Timeout waiting for 'await install stack' step"
-    echo "[$(date)] ERROR: Timeout waiting for 'await install stack' step after $MAX_POLLS polls" >> "$LOG_FILE"
-  else
-    echo "    → Waiting additional 60 seconds for step to fully load..."
-    echo "[$(date)] STEP: Waiting 60 seconds for step to stabilize" >> "$LOG_FILE"
-    sleep 60
-    echo "    ✓ Wait complete"
-    echo "[$(date)] SUCCESS: Wait complete, ready for cf-stack" >> "$LOG_FILE"
-    
-    echo "    → Running CloudFormation stack installation..."
-    echo "[$(date)] STEP: Creating temp inputs.json and running cf-stack" >> "$LOG_FILE"
-    
-    # Create temp inputs file
-    INPUTS_FILE="/tmp/nuon-demo-inputs.json"
-    echo '{}' > "$INPUTS_FILE"
-    
-    # Run cf-stack install in background (script doesn't wait for it to finish)
-    nuon cf-stack install --install-id "$INSTALL_ID" --inputs "$INPUTS_FILE" > /dev/null 2>&1 &
-    
-    # Wait 10 seconds
+  deadline=$((SECONDS + DEMO_STACK_WAIT_SECS))
+  sa=""
+  until sa="$(api_get "/v1/stacks/$INSTALL_ID/service-account" 2>/dev/null)"; do
+    [ "$SECONDS" -lt "$deadline" ] ||
+      die "$app: stack version not generated within ${DEMO_STACK_WAIT_SECS}s"
     sleep 10
-    
-    echo "[$(date)] SUCCESS: CF stack initiated" >> "$LOG_FILE"
-    echo "    ✓ CloudFormation stack installation initiated"
-  fi
-  
-  echo ""
+  done
+
+  SA_ID="$(jq -er .account_id <<<"$sa")"
+  RUNNER_API_URL="${NUON_STACK_API_URL:-$(jq -er .runner_api_url <<<"$sa")}"
+  STACK_TOKEN="$(nuon_data service-accounts tokens create --id "$SA_ID" --duration 8760h | jq -r .token)"
+
+  tfdir="$STATE_DIR/$INSTALL_ID"
+  mkdir -p "$tfdir"
+  cp "$EXT_DIR/templates/$cloud/"*.tf "$tfdir/"
+  {
+    printf 'install_id = "%s"\n' "$INSTALL_ID"
+    printf 'region = "%s"\n' "$region"
+    printf 'nuon_runner_api_url = "%s"\n' "$RUNNER_API_URL"
+    [ "$cloud" = gcp ] && printf 'project_id = "%s"\n' "$GCP_PROJECT"
+  } >"$tfdir/terraform.tfvars"
+
+  log "$app: terraform init/apply in $tfdir"
+  (
+    cd "$tfdir"
+    NUON_API_TOKEN="$STACK_TOKEN" terraform init -input=false -no-color >>"$LOG_FILE" 2>&1
+    NUON_API_TOKEN="$STACK_TOKEN" terraform apply -input=false -auto-approve -no-color 2>&1 |
+      tee -a "$LOG_FILE"
+  ) || die "$app: terraform apply failed; fix and re-run in $tfdir"
+  log "$app: stack applied"
 done
 
-echo "========================================="
-echo "✓ Demo setup complete!"
-echo "========================================="
-echo ""
-echo "Org Name: $ORG_NAME"
-echo "Org ID: $ORG_ID"
-echo "Apps created: ${APPS[*]}"
-echo ""
-
-echo "🧹 Cleaning up temporary files..."
-echo "[$(date)] STEP: Cleaning up temporary files" >> "$LOG_FILE"
-rm -rf "$REPO_DIR"
-rm -f /tmp/nuon-demo-inputs.json
-echo "✓ Cleanup complete"
-echo "[$(date)] SUCCESS: Cleanup complete" >> "$LOG_FILE"
-
-echo "[$(date)] ========== DEMO SETUP COMPLETED SUCCESSFULLY ==========" >> "$LOG_FILE"
-rm -f "$LOG_FILE"
-echo ""
+log "done. org=$ORG_ID state=$STATE_DIR"
+log "teardown with: nuon demo-setup teardown $ORG_ID"
